@@ -27,7 +27,12 @@ namespace stargaze_asset_attribute_dump_console
                 response = await base.SendAsync(request, cancellationToken);
                 if (response.IsSuccessStatusCode)
                 {
+                    Console.WriteLine("Received success status code.");
                     return response;
+                }
+                else
+                {
+                    Console.WriteLine($"Received non success status code, the code was: {response.StatusCode}");
                 }
             }
 

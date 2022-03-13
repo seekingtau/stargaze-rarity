@@ -24,16 +24,28 @@ namespace stargaze_asset_attribute_dump_console
 
             var projects = GetStargazeProjects();
 
-            foreach(var project in projects)
+            foreach (var project in projects)
             {
                 var results = await ScrapeProjects(project);
 
                 using (StreamWriter streamWriter = new StreamWriter($"results-{project.Name}.json"))
                 {
+                    int i = 0;
+
+                    //Lazily write a JSON array to a file.
+                    await streamWriter.WriteLineAsync("[");
                     foreach (string result in results)
                     {
                         await streamWriter.WriteLineAsync(result);
+                        i++;
+                        if (!(i == results.Count))
+                        {
+                            await streamWriter.WriteLineAsync(",");
+                        }
+
                     }
+
+                    await streamWriter.WriteLineAsync("]");
                 }
             }
         }
@@ -48,39 +60,39 @@ namespace stargaze_asset_attribute_dump_console
             List<Task> getTasks = new List<Task>();
             ConcurrentBag<string> itemMetadata = new ConcurrentBag<string>();
 
-            using (var semaphore = new SemaphoreSlim(5,5))
+            using (var semaphore = new SemaphoreSlim(5, 5))
             {
                 using (HttpClient client = new HttpClient(new RetryHandler(new HttpClientHandler())))
                 {
                     client.Timeout = TimeSpan.FromSeconds(15);
                     List<Task> tasks = new List<Task>();
-                        for(int i = 1; i <= project.MaxMint; i++)
+                    for (int i = 1; i <= project.MaxMint; i++)
+                    {
+                        await semaphore.WaitAsync();
+                        tasks.Add(Task.Factory.StartNew(async () =>
                         {
-                            await semaphore.WaitAsync();
-                            tasks.Add(Task.Factory.StartNew(async () =>
+                            try
                             {
-                                try
-                                {
-                                    string apiUrl = String.Format(getUrl, project.TokenMetaDataAddress, i);
+                                string apiUrl = String.Format(getUrl, project.TokenMetaDataAddress, i);
 
-                                    Console.WriteLine($"Getting item metadata for {project.Name} item #{i}");
-                                    var response = await client.GetAsync(apiUrl);
-                                    var json = await response.Content.ReadAsStringAsync();
-                                    itemMetadata.Add(json);
-                                }
-                                catch(Exception ex)
-                                {
-                                    Console.WriteLine($"Failed to get metadata for {project.Name} item #{i}!  The exception was {ex}");
-                                }
-                                finally
-                                {
-                                    Console.WriteLine($"Finished getting item metadata for {project.Name} item #{i}");
-                                    semaphore.Release();
-                                }
-                            }));
+                                Console.WriteLine($"Getting item metadata for {project.Name} item #{i}");
+                                var response = await client.GetAsync(apiUrl);
+                                var json = await response.Content.ReadAsStringAsync();
+                                itemMetadata.Add(json);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Failed to get metadata for {project.Name} item #{i}!  The exception was {ex}");
+                            }
+                            finally
+                            {
+                                Console.WriteLine($"Finished getting item metadata for {project.Name} item #{i}");
+                                semaphore.Release();
+                            }
+                        }));
 
-                            await Task.WhenAll(tasks);
-                        }
+                        await Task.WhenAll(tasks);
+                    }
 
                 }
             }
@@ -100,7 +112,7 @@ namespace stargaze_asset_attribute_dump_console
         {
 
         }
-        
+
     }
 }
 

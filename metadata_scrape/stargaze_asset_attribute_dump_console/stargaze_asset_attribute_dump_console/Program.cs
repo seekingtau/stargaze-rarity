@@ -26,26 +26,15 @@ namespace stargaze_asset_attribute_dump_console
 
             foreach (var project in projects)
             {
-                var results = await ScrapeProjects(project);
+                //var t = ScrapeProject(project);
+                var results = await ScrapeProject(project);
 
                 using (StreamWriter streamWriter = new StreamWriter($"results-{project.Name}.json"))
                 {
                     int i = 0;
 
                     //Lazily write a JSON array to a file.
-                    await streamWriter.WriteLineAsync("[");
-                    foreach (string result in results)
-                    {
-                        await streamWriter.WriteLineAsync(result);
-                        i++;
-                        if (!(i == results.Count))
-                        {
-                            await streamWriter.WriteLineAsync(",");
-                        }
-
-                    }
-
-                    await streamWriter.WriteLineAsync("]");
+                    await streamWriter.WriteLineAsync(JsonConvert.SerializeObject(results));
                 }
             }
         }
@@ -54,46 +43,53 @@ namespace stargaze_asset_attribute_dump_console
         /// </summary>
         /// <param name="project"></param>
         /// <returns></returns>
-        private static async Task<ConcurrentBag<string>> ScrapeProjects(StargazeProjectConfigItem project)
+        private static async Task<ConcurrentBag<object>> ScrapeProject(StargazeProjectConfigItem project)
         {
             var getUrl = appConfig.GetSection("StargazeApiUrl").Value;
             List<Task> getTasks = new List<Task>();
-            ConcurrentBag<string> itemMetadata = new ConcurrentBag<string>();
+            ConcurrentBag<object> itemMetadata = new ConcurrentBag<object>();
 
+            //Increase this to increase the number of connections allowed to the API.
             using (var semaphore = new SemaphoreSlim(5, 5))
             {
                 using (HttpClient client = new HttpClient(new RetryHandler(new HttpClientHandler())))
                 {
                     client.Timeout = TimeSpan.FromSeconds(15);
-                    List<Task> tasks = new List<Task>();
-                    for (int i = 1; i <= project.MaxMint; i++)
+                    List<Task> tasks = new();
+
+                    for (int n = 1; n <= project.MaxMint; n++)
                     {
+                        var itemNum = n;
+
                         await semaphore.WaitAsync();
                         tasks.Add(Task.Factory.StartNew(async () =>
                         {
                             try
                             {
-                                string apiUrl = String.Format(getUrl, project.TokenMetaDataAddress, i);
+                                string apiUrl = String.Format(getUrl, project.TokenMetaDataAddress, itemNum);
+                                JsonSerializer serializer = new JsonSerializer();
 
-                                Console.WriteLine($"Getting item metadata for {project.Name} item #{i}");
+                                
                                 var response = await client.GetAsync(apiUrl);
-                                var json = await response.Content.ReadAsStringAsync();
-                                itemMetadata.Add(json);
+                                Console.WriteLine(response.StatusCode);
+                                var jsonString = await response.Content.ReadAsStringAsync();
+                                var jsonObject = JsonConvert.DeserializeObject(jsonString);
+                                itemMetadata.Add(jsonObject);
                             }
-                            catch (Exception ex)
+                            catch(Exception ex)
                             {
-                                Console.WriteLine($"Failed to get metadata for {project.Name} item #{i}!  The exception was {ex}");
+                                Console.WriteLine($"Failed to get metadata for {project.Name} item #{itemNum}!  The exception was {ex}");
                             }
                             finally
                             {
-                                Console.WriteLine($"Finished getting item metadata for {project.Name} item #{i}");
                                 semaphore.Release();
                             }
-                        }));
-
-                        await Task.WhenAll(tasks);
+                        }).Unwrap());
                     }
 
+                    Console.WriteLine("Waiting for tasks to complete...");
+                    await Task.WhenAll(tasks);
+                    Console.WriteLine("Tasks complete.");
                 }
             }
 
